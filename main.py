@@ -22,16 +22,24 @@ class SpamPrevention(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="도배방지", description="도배 방지를 설정합니다.")
-    @app_commands.describe(channel="감시할 채널", seconds="N초 안에", count="N회 이상")
-    async def spam_protect(self, interaction: discord.Interaction, channel: discord.TextChannel, seconds: int, count: int):
+    @app_commands.describe(
+        channel="도배 로그를 보낼 채널",
+        seconds="N초 안에",
+        count="N회 이상",
+        timeout="타임아웃 시간 (초)"
+    )
+    async def spam_protect(self, interaction: discord.Interaction, channel: discord.TextChannel, seconds: int, count: int, timeout: int):
         spam_settings[interaction.guild_id] = {
-            "channel_id": channel.id,
+            "log_channel_id": channel.id,
             "seconds": seconds,
             "count": count,
+            "timeout": timeout,
             "enabled": True
         }
         await interaction.response.send_message(
-            f"✅ 도배방지 설정 완료: {channel.mention} | {seconds}초 안에 {count}회 이상 시 타임아웃",
+            f"✅ 도배방지 설정 완료: 모든 채널 감지\n"
+            f"📩 로그: {channel.mention}\n"
+            f"⏱️ {seconds}초 안에 {count}회 이상 → {timeout}초 타임아웃",
             ephemeral=True
         )
 
@@ -53,9 +61,6 @@ class SpamPrevention(commands.Cog):
         
         if not settings or not settings.get("enabled"):
             return
-        
-        if message.channel.id != settings["channel_id"]:
-            return
 
         now = datetime.datetime.utcnow()
         user_deque = user_messages[guild_id][message.author.id]
@@ -66,17 +71,21 @@ class SpamPrevention(commands.Cog):
 
         if len(user_deque) >= settings["count"]:
             try:
-                timeout_until = discord.utils.utcnow() + datetime.timedelta(seconds=60)
+                timeout_seconds = settings["timeout"]
+                timeout_until = discord.utils.utcnow() + datetime.timedelta(seconds=timeout_seconds)
                 await message.author.timeout(timeout_until, reason="도배 감지")
-                
-                embed = discord.Embed(
-                    title="🚫 도배 감지",
-                    description=f"{message.author.mention}님이 도배로 인해 1분 타임아웃 되었습니다.",
-                    color=discord.Color.red()
-                )
-                embed.add_field(name="설정", value=f"{settings['seconds']}초 안에 {settings['count']}회 이상")
-                embed.set_footer(text="봇이 자동으로 처리했습니다.")
-                await message.channel.send(embed=embed)
+
+                log_channel = message.guild.get_channel(settings["log_channel_id"])
+                if log_channel:
+                    embed = discord.Embed(
+                        title="🚫 도배 감지",
+                        description=f"{message.author.mention}님이 도배로 인해 {timeout_seconds}초 타임아웃 되었습니다.",
+                        color=discord.Color.red()
+                    )
+                    embed.add_field(name="설정", value=f"{settings['seconds']}초 안에 {settings['count']}회 이상")
+                    embed.add_field(name="발생 채널", value=message.channel.mention)
+                    embed.set_footer(text="봇이 자동으로 처리했습니다.")
+                    await log_channel.send(embed=embed)
 
             except Exception as e:
                 print(f"타임아웃 실패: {e}")
@@ -101,3 +110,4 @@ async def main():
 
 import asyncio
 asyncio.run(main())
+
