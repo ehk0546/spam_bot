@@ -4,6 +4,7 @@ from discord import app_commands
 import datetime
 from collections import defaultdict, deque
 import os
+import asyncio
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
@@ -66,6 +67,7 @@ class SpamPrevention(commands.Cog):
         user_deque = user_messages[guild_id][message.author.id]
         user_deque.append(now)
 
+        # 설정한 seconds 시간보다 오래된 기록은 삭제
         while user_deque and (now - user_deque[0]).total_seconds() > settings["seconds"]:
             user_deque.popleft()
 
@@ -74,6 +76,14 @@ class SpamPrevention(commands.Cog):
                 timeout_seconds = settings["timeout"]
                 timeout_until = discord.utils.utcnow() + datetime.timedelta(seconds=timeout_seconds)
                 await message.author.timeout(timeout_until, reason="도배 감지")
+
+                # 도배 메시지 삭제 (최근 100개 메시지 중 설정 시간 내 해당 사용자 메시지 삭제)
+                def check(m):
+                    return (
+                        m.author == message.author and 
+                        (now - m.created_at).total_seconds() <= settings["seconds"]
+                    )
+                deleted = await message.channel.purge(limit=100, check=check)
 
                 log_channel = message.guild.get_channel(settings["log_channel_id"])
                 if log_channel:
@@ -84,6 +94,7 @@ class SpamPrevention(commands.Cog):
                     )
                     embed.add_field(name="설정", value=f"{settings['seconds']}초 안에 {settings['count']}회 이상")
                     embed.add_field(name="발생 채널", value=message.channel.mention)
+                    embed.add_field(name="삭제된 메시지 수", value=str(len(deleted)))
                     embed.set_footer(text="봇이 자동으로 처리했습니다.")
                     await log_channel.send(embed=embed)
 
@@ -92,8 +103,10 @@ class SpamPrevention(commands.Cog):
 
             user_messages[guild_id][message.author.id].clear()
 
+
 async def setup(bot):
     await bot.add_cog(SpamPrevention(bot))
+
 
 @bot.event
 async def on_ready():
@@ -104,10 +117,12 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Slash command sync 실패: {e}")
 
+
 async def main():
     await setup(bot)
     await bot.start(TOKEN)
 
-import asyncio
+
 asyncio.run(main())
+
 
